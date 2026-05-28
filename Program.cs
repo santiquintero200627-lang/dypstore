@@ -85,10 +85,15 @@ using (var scope = app.Services.CreateScope())
 
     await dataProtectionContext.Database.ExecuteSqlRawAsync(@"
         CREATE TABLE IF NOT EXISTS ""DataProtectionKeys"" (
-            ""Id"" varchar(200) NOT NULL PRIMARY KEY,
+            ""Id"" varchar(200) NOT NULL DEFAULT gen_random_uuid()::text PRIMARY KEY,
             ""FriendlyName"" text NULL,
             ""Xml"" text NOT NULL
         );");
+
+    await dataProtectionContext.Database.ExecuteSqlRawAsync(@"
+        ALTER TABLE ""DataProtectionKeys""
+        ALTER COLUMN ""Id"" SET DEFAULT gen_random_uuid()::text;
+    ");
 }
 
 if (!app.Environment.IsDevelopment()) {
