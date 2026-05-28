@@ -82,6 +82,13 @@ using (var scope = app.Services.CreateScope())
     await DYPStore.Data.DbInitializer.InitializeAsync(scope.ServiceProvider);
     var dataProtectionContext = scope.ServiceProvider.GetRequiredService<DataProtectionKeyContext>();
     await dataProtectionContext.Database.EnsureCreatedAsync();
+
+    await dataProtectionContext.Database.ExecuteSqlRawAsync(@"
+        CREATE TABLE IF NOT EXISTS ""DataProtectionKeys"" (
+            ""Id"" varchar(200) NOT NULL PRIMARY KEY,
+            ""FriendlyName"" text NULL,
+            ""Xml"" text NOT NULL
+        );");
 }
 
 if (!app.Environment.IsDevelopment()) {
