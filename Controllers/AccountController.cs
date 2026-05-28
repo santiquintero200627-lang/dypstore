@@ -1,6 +1,7 @@
 using DYPStore.Models;
 using DYPStore.Models.ViewModels;
 using DYPStore.Services; 
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -37,7 +38,15 @@ namespace DYPStore.Controllers
 
             try
             {
-                var result = await _signInManager.PasswordSignInAsync(model.Email, model.Password, model.RememberMe, false);
+            // Check lockout status to give a clearer message if the account is blocked
+            var userForLock = await _userManager.FindByEmailAsync(model.Email);
+            if (userForLock != null && await _userManager.IsLockedOutAsync(userForLock))
+            {
+              ModelState.AddModelError("", "Cuenta bloqueada temporalmente por varios intentos fallidos. Intenta de nuevo más tarde.");
+              return View(model);
+            }
+
+            var result = await _signInManager.PasswordSignInAsync(model.Email, model.Password, model.RememberMe, lockoutOnFailure: true);
 
                 if (result.Succeeded)
                 {
@@ -77,8 +86,36 @@ namespace DYPStore.Controllers
 
             try
             {
-                var user = new ApplicationUser { UserName = model.Email, Email = model.Email, FullName = model.FullName, EmailConfirmed = true };
-                var result = await _userManager.CreateAsync(user, model.Password);
+            // Trim and normalize inputs
+            model.FullName = model.FullName?.Trim() ?? string.Empty;
+            model.Email = model.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+
+            // Validate full name (letters, spaces, hyphens, accents)
+            var namePattern = "^[\\p{L} .'-]{2,100}$";
+            if (!Regex.IsMatch(model.FullName, namePattern))
+            {
+              ModelState.AddModelError(nameof(model.FullName), "Nombre inválido. Usa sólo letras, espacios y caracteres comunes.");
+              return View(model);
+            }
+
+            // Password strength server-side (same rules as Identity options)
+            var pwdPattern = @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*\W).{8,}$";
+            if (!Regex.IsMatch(model.Password, pwdPattern))
+            {
+              ModelState.AddModelError(nameof(model.Password), "La contraseña debe tener al menos 8 caracteres, incluir mayúsculas, minúsculas, números y símbolos.");
+              return View(model);
+            }
+
+            // Ensure email is unique before attempting creation
+            var existing = await _userManager.FindByEmailAsync(model.Email);
+            if (existing != null)
+            {
+              ModelState.AddModelError(nameof(model.Email), "Ya existe una cuenta registrada con ese correo.");
+              return View(model);
+            }
+
+            var user = new ApplicationUser { UserName = model.Email, Email = model.Email, FullName = model.FullName, EmailConfirmed = true };
+            var result = await _userManager.CreateAsync(user, model.Password);
 
                 if (result.Succeeded)
                 {

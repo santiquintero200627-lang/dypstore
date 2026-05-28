@@ -3,6 +3,13 @@ using DYPStore.Models;
 using DYPStore.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
+using System.Net.Sockets;
+using System;
+
+// Forzar IPv4 para evitar problemas con DNS que devuelve IPv6 pero la red local no lo soporta
+AppContext.SetSwitch("System.Net.Http.UseSocketsHttpHandler", true);
+ServicePointManager.DnsRefreshTimeout = 0;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,15 +21,25 @@ builder.Services.AddDbContext<ApplicationDbContext>((sp, options) => {
 });
 
 // 2. Identity
-builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options => {
-    options.Password.RequireDigit = false;
-    options.Password.RequiredLength = 6;
-    options.Password.RequireNonAlphanumeric = false;
-    options.Password.RequireUppercase = false;
-    options.Password.RequireLowercase = false;
+builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
+{
+    // Password strength: minimum recommended by OWASP
+    options.Password.RequireDigit = true;
+    options.Password.RequiredLength = 8;
+    options.Password.RequireNonAlphanumeric = true;
+    options.Password.RequireUppercase = true;
+    options.Password.RequireLowercase = true;
+
+    // Lockout settings to mitigate brute force attempts
+    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(5);
+    options.Lockout.MaxFailedAccessAttempts = 5;
+    options.Lockout.AllowedForNewUsers = true;
+
+    // User settings
+    options.User.RequireUniqueEmail = true;
 })
-.AddEntityFrameworkStores<ApplicationDbContext>()
-.AddDefaultTokenProviders();
+    .AddEntityFrameworkStores<ApplicationDbContext>()
+    .AddDefaultTokenProviders();
 
 // 3. Servicios
 builder.Services.AddTransient<IEmailSender, EmailSender>();
