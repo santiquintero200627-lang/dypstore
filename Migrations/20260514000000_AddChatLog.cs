@@ -4,9 +4,14 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
+using DYPStore.Data;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+
 namespace DYPStore.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(ApplicationDbContext))]
+    [Migration("20260514000000_AddChatLog")]
     public partial class AddChatLog : Migration
     {
         /// <inheritdoc />
