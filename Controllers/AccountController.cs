@@ -34,7 +34,17 @@ namespace DYPStore.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Login(LoginViewModel model)
         {
-            if (!ModelState.IsValid) return View(model);
+          if (!ModelState.IsValid)
+          {
+            if (Request.Headers["X-Requested-With"] == "XMLHttpRequest" || Request.Headers["Accept"].ToString().Contains("application/json"))
+            {
+              var errors = ModelState.Where(kvp => kvp.Value.Errors.Count > 0)
+                .Select(kvp => new { Field = kvp.Key, Messages = kvp.Value.Errors.Select(e => e.ErrorMessage).ToArray() });
+              return BadRequest(new { Errors = errors });
+            }
+
+            return View(model);
+          }
 
             try
             {
@@ -61,6 +71,10 @@ namespace DYPStore.Controllers
                 }
 
                 ModelState.AddModelError("", "Correo o contraseña incorrectos.");
+                if (Request.Headers["X-Requested-With"] == "XMLHttpRequest" || Request.Headers["Accept"].ToString().Contains("application/json"))
+                {
+                  return BadRequest(new { Errors = new[] { new { Field = "", Message = "Correo o contraseña incorrectos." } } });
+                }
             }
             catch (Exception)
             {
@@ -82,7 +96,17 @@ namespace DYPStore.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Register(RegisterViewModel model)
         {
-            if (!ModelState.IsValid) return View(model);
+            if (!ModelState.IsValid)
+            {
+              if (Request.Headers["X-Requested-With"] == "XMLHttpRequest" || Request.Headers["Accept"].ToString().Contains("application/json"))
+              {
+                var errors = ModelState.Where(kvp => kvp.Value.Errors.Count > 0)
+                  .Select(kvp => new { Field = kvp.Key, Messages = kvp.Value.Errors.Select(e => e.ErrorMessage).ToArray() });
+                return BadRequest(new { Errors = errors });
+              }
+
+              return View(model);
+            }
 
             try
             {

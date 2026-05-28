@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.Sockets;
 using System;
+using FluentValidation;
+using FluentValidation.AspNetCore;
 
 // Forzar IPv4 para evitar problemas con DNS que devuelve IPv6 pero la red local no lo soporta
 AppContext.SetSwitch("System.Net.Http.UseSocketsHttpHandler", true);
@@ -46,6 +48,11 @@ builder.Services.AddTransient<IEmailSender, EmailSender>();
 builder.Services.AddScoped<ChatbotService>();
 
 builder.Services.AddControllersWithViews();
+
+// FluentValidation: enable automatic validation and register validators
+builder.Services.AddFluentValidationAutoValidation();
+builder.Services.AddValidatorsFromAssemblyContaining<DYPStore.Validators.RegisterViewModelValidator>();
+
 builder.Services.AddSession();
 
 var app = builder.Build();
