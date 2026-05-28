@@ -1,6 +1,8 @@
 using DYPStore.Data;
 using DYPStore.Models;
 using DYPStore.Services;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
@@ -21,6 +23,15 @@ builder.Services.AddDbContext<ApplicationDbContext>((sp, options) => {
     var steward = sp.GetRequiredService<DatabaseSteward>();
     options.UseNpgsql(steward.GetConnectionString());
 });
+
+builder.Services.AddDbContext<DataProtectionKeyContext>((sp, options) => {
+    var steward = sp.GetRequiredService<DatabaseSteward>();
+    options.UseNpgsql(steward.GetConnectionString());
+});
+
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<DataProtectionKeyContext>()
+    .SetApplicationName("DYPStore");
 
 // 2. Identity
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
@@ -69,6 +80,8 @@ app.Use(async (context, next) =>
 using (var scope = app.Services.CreateScope())
 {
     await DYPStore.Data.DbInitializer.InitializeAsync(scope.ServiceProvider);
+    var dataProtectionContext = scope.ServiceProvider.GetRequiredService<DataProtectionKeyContext>();
+    await dataProtectionContext.Database.EnsureCreatedAsync();
 }
 
 if (!app.Environment.IsDevelopment()) {
