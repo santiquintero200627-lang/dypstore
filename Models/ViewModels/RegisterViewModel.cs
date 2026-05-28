@@ -13,7 +13,7 @@ namespace DYPStore.Models.ViewModels
         public string Email { get; set; } = string.Empty;
 
         [Required(ErrorMessage="La contraseña es requerida")]
-        [StringLength(100, MinimumLength=6, ErrorMessage="Mínimo 6 caracteres")]
+        [StringLength(100, MinimumLength=8, ErrorMessage="Mínimo 8 caracteres")]
         [DataType(DataType.Password)]
         [Display(Name="Contraseña")]
         public string Password { get; set; } = string.Empty;

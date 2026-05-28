@@ -60,8 +60,26 @@ namespace DYPStore.Controllers
             var uid = _um.GetUserId(User)!;
             var items = await _db.CartItems.Include(c => c.Product).Where(c => c.UserId == uid).ToListAsync();
             if (!items.Any()) { TempData["Error"] = "Tu carrito está vacío."; return RedirectToAction("Index"); }
+
+            // Validar stock disponible antes de procesar (#9)
+            var stockErrors = items
+                .Where(i => i.Product.Stock < i.Quantity)
+                .Select(i => $"{i.Product.Name} (disponible: {i.Product.Stock}, solicitado: {i.Quantity})");
+            if (stockErrors.Any())
+            {
+                TempData["Error"] = $"Stock insuficiente para: {string.Join(", ", stockErrors)}. Ajusta las cantidades e intenta de nuevo.";
+                return RedirectToAction("Index");
+            }
+
             var order = new Order { UserId = uid, Status = OrderStatus.pending, Total = items.Sum(i => i.Product.Price * i.Quantity), Items = items.Select(i => new OrderItem { ProductId = i.ProductId, ProductName = i.Product.Name, UnitPrice = i.Product.Price, Quantity = i.Quantity }).ToList() };
-            _db.Orders.Add(order); _db.CartItems.RemoveRange(items); await _db.SaveChangesAsync();
+            _db.Orders.Add(order);
+
+            // Descontar el stock de cada producto (#4)
+            foreach (var item in items)
+                item.Product.Stock -= item.Quantity;
+
+            _db.CartItems.RemoveRange(items);
+            await _db.SaveChangesAsync();
             TempData["Success"] = "¡Pedido creado exitosamente! Gracias por tu compra.";
             return RedirectToAction("Index", "Orders");
         }

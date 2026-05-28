@@ -2,7 +2,6 @@ using DYPStore.Models.ViewModels;
 using FluentValidation;
 using Microsoft.AspNetCore.Identity;
 using DYPStore.Models;
-using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace DYPStore.Validators
@@ -22,7 +21,12 @@ namespace DYPStore.Validators
             RuleFor(x => x.Email)
                 .NotEmpty().WithMessage("El correo es requerido")
                 .EmailAddress().WithMessage("Correo inválido")
-                .Must(email => IsEmailUnique(userManager, email)).WithMessage("Ya existe una cuenta registrada con ese correo.");
+                .MustAsync(async (email, ct) =>
+                {
+                    if (string.IsNullOrWhiteSpace(email)) return false;
+                    var existing = await userManager.FindByEmailAsync(email.Trim().ToLowerInvariant());
+                    return existing == null;
+                }).WithMessage("Ya existe una cuenta registrada con ese correo.");
 
             RuleFor(x => x.Password)
                 .NotEmpty().WithMessage("La contraseña es requerida")
@@ -30,13 +34,6 @@ namespace DYPStore.Validators
 
             RuleFor(x => x.ConfirmPassword)
                 .Equal(x => x.Password).WithMessage("Las contraseñas no coinciden");
-        }
-
-        private static bool IsEmailUnique(UserManager<ApplicationUser> userManager, string email)
-        {
-            if (string.IsNullOrWhiteSpace(email)) return false;
-            var normalizedEmail = email.Trim().ToLowerInvariant();
-            return !userManager.Users.Any(u => u.Email != null && u.Email.ToLower() == normalizedEmail);
         }
     }
 }

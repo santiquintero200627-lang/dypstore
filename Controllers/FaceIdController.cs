@@ -3,6 +3,7 @@ using DYPStore.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -99,6 +100,7 @@ namespace DYPStore.Controllers
         [HttpPost]
         [Route("api/faceid/verify")]
         [IgnoreAntiforgeryToken]
+        [EnableRateLimiting("faceid")] // Max 10 intentos por minuto (#8)
         public async Task<IActionResult> Verify([FromBody] FaceVerifyRequest req)
         {
             if (req?.Descriptor == null || req.Descriptor.Length != 128)

@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using System.Threading.Tasks;
 
 namespace DYPStore.Controllers
@@ -14,12 +15,16 @@ namespace DYPStore.Controllers
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly IEmailSender _emailSender;
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<AccountController> _logger;
 
-        public AccountController(UserManager<ApplicationUser> um, SignInManager<ApplicationUser> sm, IEmailSender emailSender) 
+        public AccountController(UserManager<ApplicationUser> um, SignInManager<ApplicationUser> sm, IEmailSender emailSender, IConfiguration configuration, ILogger<AccountController> logger) 
         { 
             _userManager = um; 
             _signInManager = sm; 
             _emailSender = emailSender;
+            _configuration = configuration;
+            _logger = logger;
         }
 
         // --- LOGIN ---
@@ -38,8 +43,8 @@ namespace DYPStore.Controllers
           {
             if (Request.Headers["X-Requested-With"] == "XMLHttpRequest" || Request.Headers["Accept"].ToString().Contains("application/json"))
             {
-              var errors = ModelState.Where(kvp => kvp.Value.Errors.Count > 0)
-                .Select(kvp => new { Field = kvp.Key, Messages = kvp.Value.Errors.Select(e => e.ErrorMessage).ToArray() });
+              var errors = ModelState.Where(kvp => kvp.Value?.Errors.Count > 0)
+                .Select(kvp => new { Field = kvp.Key, Messages = kvp.Value!.Errors.Select(e => e.ErrorMessage).ToArray() });
               return BadRequest(new { Errors = errors });
             }
 
@@ -100,8 +105,8 @@ namespace DYPStore.Controllers
             {
               if (Request.Headers["X-Requested-With"] == "XMLHttpRequest" || Request.Headers["Accept"].ToString().Contains("application/json"))
               {
-                var errors = ModelState.Where(kvp => kvp.Value.Errors.Count > 0)
-                  .Select(kvp => new { Field = kvp.Key, Messages = kvp.Value.Errors.Select(e => e.ErrorMessage).ToArray() });
+                var errors = ModelState.Where(kvp => kvp.Value?.Errors.Count > 0)
+                  .Select(kvp => new { Field = kvp.Key, Messages = kvp.Value!.Errors.Select(e => e.ErrorMessage).ToArray() });
                 return BadRequest(new { Errors = errors });
               }
 
@@ -339,7 +344,9 @@ namespace DYPStore.Controllers
             }
             catch (System.Exception ex)
             {
-                return Content($"ERROR CRÍTICO: {ex.Message}\n\nStackTrace:\n{ex.StackTrace}", "text/plain");
+                _logger.LogError(ex, "Error en ForgotPassword para {Email}", model.Email);
+                ModelState.AddModelError("", "Ocurrió un error al procesar tu solicitud. Por favor intenta de nuevo más tarde.");
+                return View(model);
             }
         }
 
@@ -390,10 +397,12 @@ namespace DYPStore.Controllers
 
             using var httpClient = new System.Net.Http.HttpClient();
             // Validar token contra los servidores de Supabase de manera segura
-            httpClient.DefaultRequestHeaders.Add("apikey", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd0c3hpdXVyc3l2aXF6dWF5enZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0MTAyNTYsImV4cCI6MjA4ODk4NjI1Nn0.8r2kRgGB4rRKmHD93yNZ6gTr8szERmuERDHGRxJd4Lk");
+            var supabaseAnonKey = _configuration["Supabase:AnonKey"] ?? string.Empty;
+            var supabaseUrl = _configuration["Supabase:Url"] ?? "https://gtsxiuursyviqzuayzvm.supabase.co";
+            httpClient.DefaultRequestHeaders.Add("apikey", supabaseAnonKey);
             httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", model.AccessToken);
 
-            var response = await httpClient.GetAsync("https://gtsxiuursyviqzuayzvm.supabase.co/auth/v1/user");
+            var response = await httpClient.GetAsync($"{supabaseUrl}/auth/v1/user");
             if (!response.IsSuccessStatusCode)
             {
                 return Unauthorized("Token inválido");

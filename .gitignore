@@ -203,6 +203,10 @@ PublishScripts/
 migration_type_check.txt
 preprocessed.xml
 
+# Local debug/log files — never commit these (#11)
+error_log.txt
+check_db.csx
+
 
 # NuGet Packages
 *.nupkg

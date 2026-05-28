@@ -5,9 +5,11 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Net;
 using System.Net.Sockets;
 using System;
+using System.Threading.RateLimiting;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 
@@ -66,6 +68,19 @@ builder.Services.AddValidatorsFromAssemblyContaining<DYPStore.Validators.Registe
 
 builder.Services.AddSession();
 
+// Rate limiting: protege /api/faceid/verify contra fuerza bruta (#8)
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("faceid", limiterOptions =>
+    {
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.PermitLimit = 10;
+        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit = 0;
+    });
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+});
+
 var app = builder.Build();
 
 // Middleware para inyectar el estado de Failover para el Frontend
@@ -119,9 +134,11 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
 
+app.UseRateLimiter();
+
+app.UseSession(); // Debe ir ANTES de Authentication (#5)
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseSession();
 
 app.MapControllers(); // attribute-routed controllers (FaceIdController, ChatbotController, etc.)
 
