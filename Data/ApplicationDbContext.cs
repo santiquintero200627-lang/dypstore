@@ -56,6 +56,25 @@ namespace DYPStore.Data
             builder.Entity<FaceEnrollment>()
                 .HasIndex(f => f.UserId)
                 .IsUnique();
+
+            // --- RESTRICCIONES CHECK DE BASE DE DATOS ---
+            builder.Entity<Product>()
+                .ToTable(t => {
+                    t.HasCheckConstraint("CK_Product_Stock_Positive", "\"Stock\" >= 0");
+                    t.HasCheckConstraint("CK_Product_Price_Positive", "\"Price\" >= 0");
+                });
+
+            builder.Entity<Order>()
+                .ToTable(t => t.HasCheckConstraint("CK_Order_Total_Positive", "\"Total\" >= 0"));
+
+            builder.Entity<OrderItem>()
+                .ToTable(t => {
+                    t.HasCheckConstraint("CK_OrderItem_Quantity_Positive", "\"Quantity\" > 0");
+                    t.HasCheckConstraint("CK_OrderItem_UnitPrice_Positive", "\"UnitPrice\" >= 0");
+                });
+
+            builder.Entity<CartItem>()
+                .ToTable(t => t.HasCheckConstraint("CK_CartItem_Quantity_Positive", "\"Quantity\" > 0"));
         }
     }
 }
