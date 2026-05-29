@@ -36,13 +36,13 @@
 
                         <div class="mb-3">
                             <label asp-for="Email" class="form-label">Correo electrónico</label>
-                            <input asp-for="Email" class="form-control dyp-input" placeholder="tu@correo.com" autocomplete="email" />
+                            <input asp-for="Email" type="email" class="form-control dyp-input" placeholder="tu@correo.com" autocomplete="email" required />
                             <span asp-validation-for="Email" class="text-danger small"></span>
                         </div>
 
                         <div class="mb-3">
                             <label asp-for="Password" class="form-label">Contraseña</label>
-                            <input asp-for="Password" class="form-control dyp-input" placeholder="••••••••" autocomplete="current-password" />
+                            <input asp-for="Password" type="password" class="form-control dyp-input" placeholder="••••••••" autocomplete="current-password" required />
                             <span asp-validation-for="Password" class="text-danger small"></span>
                         </div>
 
