@@ -11,6 +11,8 @@ namespace DYPStore.Validators
         private const string NamePattern = "^[\\p{L} .'-]{2,100}$";
         private const string PasswordPattern = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*\\W).{8,}$";
 
+        private const string EmailPattern = @"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
+
         public RegisterViewModelValidator(UserManager<ApplicationUser> userManager)
         {
             RuleFor(x => x.FullName)
@@ -20,13 +22,7 @@ namespace DYPStore.Validators
 
             RuleFor(x => x.Email)
                 .NotEmpty().WithMessage("El correo es requerido")
-                .EmailAddress().WithMessage("Correo inválido")
-                .MustAsync(async (email, ct) =>
-                {
-                    if (string.IsNullOrWhiteSpace(email)) return false;
-                    var existing = await userManager.FindByEmailAsync(email.Trim().ToLowerInvariant());
-                    return existing == null;
-                }).WithMessage("Ya existe una cuenta registrada con ese correo.");
+                .Matches(EmailPattern).WithMessage("Correo electrónico inválido. Asegúrate de incluir el dominio (ej. @gmail.com)");
 
             RuleFor(x => x.Password)
                 .NotEmpty().WithMessage("La contraseña es requerida")
