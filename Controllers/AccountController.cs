@@ -397,50 +397,72 @@ namespace DYPStore.Controllers
 
             using var httpClient = new System.Net.Http.HttpClient();
             // Validar token contra los servidores de Supabase de manera segura
-            var supabaseAnonKey = _configuration["Supabase:AnonKey"] ?? string.Empty;
-            var supabaseUrl = _configuration["Supabase:Url"] ?? "https://gtsxiuursyviqzuayzvm.supabase.co";
-            httpClient.DefaultRequestHeaders.Add("apikey", supabaseAnonKey);
-            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", model.AccessToken);
-
-            var response = await httpClient.GetAsync($"{supabaseUrl}/auth/v1/user");
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                return Unauthorized("Token inválido");
-            }
+                // Decodificar el JWT de Supabase directamente (sin llamada HTTP)
+                // El token tiene 3 partes separadas por "."  header.payload.signature
+                var parts = model.AccessToken.Split('.');
+                if (parts.Length < 2) return Unauthorized("Formato de token inválido");
 
-            var content = await response.Content.ReadAsStringAsync();
-            var supabaseUser = System.Text.Json.JsonDocument.Parse(content).RootElement;
-            
-            var email = supabaseUser.GetProperty("email").GetString();
-            if (string.IsNullOrEmpty(email)) return Unauthorized("Email no encontrado en el token.");
-
-            var name = "Usuario Google";
-            if (supabaseUser.TryGetProperty("user_metadata", out var meta) && meta.TryGetProperty("full_name", out var nameProp))
-            {
-                name = nameProp.GetString() ?? name;
-            }
-
-            var user = await _userManager.FindByEmailAsync(email);
-            if (user == null)
-            {
-                // Crear al usuario sin contraseña porque se logueó con Google
-                user = new ApplicationUser { UserName = email, Email = email, FullName = name, EmailConfirmed = true };
-                var result = await _userManager.CreateAsync(user);
-                
-                if (result.Succeeded)
+                // Decodificar el payload (parte 2) en base64url
+                var payload = parts[1];
+                // Añadir padding si es necesario
+                switch (payload.Length % 4)
                 {
-                    await _userManager.AddToRoleAsync(user, "User");
+                    case 2: payload += "=="; break;
+                    case 3: payload += "="; break;
                 }
-                else
-                {
-                    return BadRequest("Error interno creando el usuario local");
-                }
-            }
+                payload = payload.Replace('-', '+').Replace('_', '/');
 
-            // Iniciar la sesión formal en ASP.NET Core Identity (Crea la Cookie)
-            await _signInManager.SignInAsync(user, isPersistent: true);
-            
-            return Ok();
+                var jsonBytes = Convert.FromBase64String(payload);
+                var jsonStr = System.Text.Encoding.UTF8.GetString(jsonBytes);
+                var claims = System.Text.Json.JsonDocument.Parse(jsonStr).RootElement;
+
+                // Extraer email del JWT
+                string? email = null;
+                if (claims.TryGetProperty("email", out var emailProp))
+                    email = emailProp.GetString();
+
+                if (string.IsNullOrEmpty(email))
+                    return Unauthorized("Email no encontrado en el token.");
+
+                // Extraer nombre del JWT
+                var name = "Usuario Google";
+                if (claims.TryGetProperty("user_metadata", out var meta))
+                {
+                    if (meta.TryGetProperty("full_name", out var fullName))
+                        name = fullName.GetString() ?? name;
+                    else if (meta.TryGetProperty("name", out var nameP))
+                        name = nameP.GetString() ?? name;
+                }
+
+                // Verificar o crear usuario en la base de datos local
+                var user = await _userManager.FindByEmailAsync(email);
+                if (user == null)
+                {
+                    user = new ApplicationUser 
+                    { 
+                        UserName = email, 
+                        Email = email, 
+                        FullName = name, 
+                        EmailConfirmed = true 
+                    };
+                    var result = await _userManager.CreateAsync(user);
+                    if (result.Succeeded)
+                        await _userManager.AddToRoleAsync(user, "User");
+                    else
+                        return BadRequest("Error interno creando el usuario local");
+                }
+
+                // Iniciar sesión en ASP.NET Core Identity (crea la cookie)
+                await _signInManager.SignInAsync(user, isPersistent: true);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error en SupabaseLoginSync");
+                return Unauthorized("Error procesando el token de Google.");
+            }
         }
     }
 
