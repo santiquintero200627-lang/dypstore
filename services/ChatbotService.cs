@@ -2,7 +2,10 @@ using DYPStore.Data;
 using DYPStore.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace DYPStore.Services
@@ -63,12 +66,15 @@ namespace DYPStore.Services
         private readonly ApplicationDbContext _db;
         private readonly UserManager<ApplicationUser> _um;
         private readonly ILogger<ChatbotService> _logger;
+        private readonly IConfiguration _config;
+        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
 
-        public ChatbotService(ApplicationDbContext db, UserManager<ApplicationUser> um, ILogger<ChatbotService> logger)
+        public ChatbotService(ApplicationDbContext db, UserManager<ApplicationUser> um, ILogger<ChatbotService> logger, IConfiguration config)
         {
             _db = db;
             _um = um;
             _logger = logger;
+            _config = config;
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -224,6 +230,94 @@ namespace DYPStore.Services
 
             try
             {
+                // 1. Ejecutar acciones administrativas directas (escrituras o grids específicos de admin)
+                var adminActions = new[]
+                {
+                    ChatIntent.AdminInventory, ChatIntent.AdminLowStock, ChatIntent.AdminOutOfStock,
+                    ChatIntent.AdminListUsers, ChatIntent.AdminStats, ChatIntent.AdminCreateProduct,
+                    ChatIntent.AdminEditProduct, ChatIntent.AdminDeleteProduct, ChatIntent.AdminUpdateStock,
+                    ChatIntent.AdminUpdatePrice, ChatIntent.AdminFilterCategory
+                };
+
+                if (adminActions.Contains(intent.Intent))
+                {
+                    return intent.Intent switch
+                    {
+                        ChatIntent.AdminInventory     => await AdminInventoryAsync(),
+                        ChatIntent.AdminLowStock      => await AdminLowStockAsync(intent.StockThreshold ?? 5),
+                        ChatIntent.AdminOutOfStock    => await AdminOutOfStockAsync(),
+                        ChatIntent.AdminListUsers     => await AdminListUsersAsync(),
+                        ChatIntent.AdminStats         => await AdminStatsAsync(),
+                        ChatIntent.AdminCreateProduct => AdminCreateProductGuide(intent),
+                        ChatIntent.AdminEditProduct   => await AdminEditProductGuideAsync(intent, message),
+                        ChatIntent.AdminDeleteProduct => await AdminDeleteProductGuideAsync(intent, message),
+                        ChatIntent.AdminUpdateStock   => await AdminUpdateStockAsync(intent, message),
+                        ChatIntent.AdminUpdatePrice   => await AdminUpdatePriceAsync(intent, message),
+                        ChatIntent.AdminFilterCategory=> await AdminFilterCategoryAsync(intent),
+                        _                             => UnknownResponse(isAdmin)
+                    };
+                }
+
+                // 2. Intentar llamar a IA si hay API Key configurada
+                var geminiKey = _config["Gemini:ApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+                var openAiKey = _config["OpenAI:ApiKey"] ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+
+                if (!string.IsNullOrEmpty(geminiKey) || !string.IsNullOrEmpty(openAiKey))
+                {
+                    var products = await _db.Products.ToListAsync();
+                    var catalogInfo = string.Join("\n", products.Select(p => $"- {p.Name} (ID: {p.Id}, Marca: {p.Brand}, Categoría: {CatLabel(p.Category)}, Precio: ${p.Price:N0}, Stock: {p.Stock} disp.): {p.Description}"));
+                    var roleLabel = isAdmin ? "Administrador" : "Usuario regular / Público";
+
+                    var systemPrompt = $@"Eres el asistente virtual inteligente oficial de la tienda deportiva DYPStore.
+El rol actual del usuario es: {roleLabel}.
+
+INSTRUCCIONES DE SEGURIDAD Y PERMISOS DE ROLES (¡CRÍTICO!):
+- Si el usuario es 'Usuario regular / Público':
+  * NO tienes acceso a datos del sistema de administración.
+  * NO reveles correos electrónicos de clientes, registros de usuarios, estadísticas de ventas, ingresos, historial de chat de otros usuarios o detalles de inventario completo.
+  * Si el usuario te pregunta por estadísticas, usuarios registrados o actualizar existencias/precios, debes denegar el acceso con amabilidad indicándole que solo los administradores autorizados pueden realizar estas operaciones.
+  * NO realices acciones como eliminar productos, crear productos o cambiar precios/inventario.
+- Si el usuario es 'Administrador':
+  * Tienes permitido hablar sobre stock completo, existencias, lista de usuarios registrados e ingresos.
+  * Si el administrador te solicita editar precios, stock, crear o eliminar un producto, guíalo indicándole cómo hacerlo usando los comandos rápidos del chat o en su respectivo panel del dashboard.
+
+INFORMACIÓN DEL CATÁLOGO DE PRODUCTOS (Real en Base de Datos):
+{catalogInfo}
+
+POLÍTICAS Y PREGUNTAS FRECUENTES (FAQ):
+- Envíos: Realizados en 24-48 horas hábiles a nivel nacional. El costo se calcula en base a la ubicación en el checkout.
+- Devoluciones: Dentro de los 30 días posteriores a la entrega. El producto debe estar intacto, sin usar y en su empaque original.
+- Garantía: Cobertura premium ante fallos de fábrica. Escribir a soporte@dypstore.com.
+- Métodos de pago: Tarjeta de crédito, débito, PSE y pago contra entrega (para ciertas ciudades).
+- Pasos para comprar: 1. Añadir al carrito. 2. Iniciar sesión. 3. Proceder al pago.
+
+DIRECTRICES DE FORMATO DE RESPUESTA:
+- Responde siempre en español.
+- Sé servicial, entusiasta sobre el deporte y amigable.
+- Tu respuesta DEBE ser en formato HTML sencillo y limpio para integrarse con la burbuja de chat de la web. Puedes usar etiquetas como <strong>, <em>, <br>, <ul>, <li>, o enlaces <a href='/Products/Details/ID'> para productos específicos. No uses bloques de código con markdown o etiquetas ```html. Escribe la respuesta directamente en HTML.
+- Si recomiendas productos, incluye su nombre exacto y puedes enlazar a su detalle usando: <a href='/Products/Details/{{id}}' class='text-danger fw-bold'>{{nombre}}</a>.";
+
+                    string? aiResponse = null;
+                    if (!string.IsNullOrEmpty(geminiKey))
+                    {
+                        _logger.LogInformation("Calling Gemini AI API for message: {Msg}", message);
+                        aiResponse = await CallGeminiAsync(systemPrompt, message, geminiKey);
+                    }
+                    else if (!string.IsNullOrEmpty(openAiKey))
+                    {
+                        _logger.LogInformation("Calling OpenAI API for message: {Msg}", message);
+                        aiResponse = await CallOpenAIAsync(systemPrompt, message, openAiKey);
+                    }
+
+                    if (!string.IsNullOrEmpty(aiResponse))
+                    {
+                        return Ok(aiResponse);
+                    }
+
+                    _logger.LogWarning("AI Response was empty or failed. Falling back to local rules.");
+                }
+
+                // 3. Fallback a lógica de reglas locales
                 return intent.Intent switch
                 {
                     ChatIntent.Greeting           => Greeting(isAdmin),
@@ -238,18 +332,6 @@ namespace DYPStore.Services
                     ChatIntent.CheckPromotions    => await PromotionsAsync(),
                     ChatIntent.CheckAvailability  => await CheckAvailabilityAsync(intent, message),
                     ChatIntent.FAQ                => FAQ(message),
-                    // Admin
-                    ChatIntent.AdminInventory     => await AdminInventoryAsync(),
-                    ChatIntent.AdminLowStock      => await AdminLowStockAsync(intent.StockThreshold ?? 5),
-                    ChatIntent.AdminOutOfStock    => await AdminOutOfStockAsync(),
-                    ChatIntent.AdminListUsers     => await AdminListUsersAsync(),
-                    ChatIntent.AdminStats         => await AdminStatsAsync(),
-                    ChatIntent.AdminCreateProduct => AdminCreateProductGuide(intent),
-                    ChatIntent.AdminEditProduct   => await AdminEditProductGuideAsync(intent, message),
-                    ChatIntent.AdminDeleteProduct => await AdminDeleteProductGuideAsync(intent, message),
-                    ChatIntent.AdminUpdateStock   => await AdminUpdateStockAsync(intent, message),
-                    ChatIntent.AdminUpdatePrice   => await AdminUpdatePriceAsync(intent, message),
-                    ChatIntent.AdminFilterCategory=> await AdminFilterCategoryAsync(intent),
                     _                             => UnknownResponse(isAdmin)
                 };
             }
@@ -786,6 +868,114 @@ namespace DYPStore.Services
                     sb.Append(c);
             }
             return sb.ToString().Normalize(NormalizationForm.FormC);
+        }
+
+        private async Task<string?> CallGeminiAsync(string systemPrompt, string userMessage, string apiKey)
+        {
+            try
+            {
+                var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={apiKey}";
+                var payload = new
+                {
+                    systemInstruction = new
+                    {
+                        parts = new[] { new { text = systemPrompt } }
+                    },
+                    contents = new[]
+                    {
+                        new
+                        {
+                            role = "user",
+                            parts = new[] { new { text = userMessage } }
+                        }
+                    },
+                    generationConfig = new
+                    {
+                        temperature = 0.7,
+                        maxOutputTokens = 1000
+                    }
+                };
+
+                var json = JsonSerializer.Serialize(payload);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var response = await _httpClient.PostAsync(url, content);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errText = await response.Content.ReadAsStringAsync();
+                    _logger.LogError("Gemini API error: Status={Status}, Body={Body}", response.StatusCode, errText);
+                    return null;
+                }
+
+                var resText = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(resText);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("candidates", out var candidates) &&
+                    candidates.GetArrayLength() > 0 &&
+                    candidates[0].TryGetProperty("content", out var contentObj) &&
+                    contentObj.TryGetProperty("parts", out var parts) &&
+                    parts.GetArrayLength() > 0 &&
+                    parts[0].TryGetProperty("text", out var textProp))
+                {
+                    return textProp.GetString();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error calling Gemini API");
+            }
+            return null;
+        }
+
+        private async Task<string?> CallOpenAIAsync(string systemPrompt, string userMessage, string apiKey)
+        {
+            try
+            {
+                var url = "https://api.openai.com/v1/chat/completions";
+                var payload = new
+                {
+                    model = "gpt-4o-mini",
+                    messages = new[]
+                    {
+                        new { role = "system", content = systemPrompt },
+                        new { role = "user", content = userMessage }
+                    },
+                    temperature = 0.7,
+                    max_tokens = 1000
+                };
+
+                var json = JsonSerializer.Serialize(payload);
+                var request = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+                var response = await _httpClient.SendAsync(request);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errText = await response.Content.ReadAsStringAsync();
+                    _logger.LogError("OpenAI API error: Status={Status}, Body={Body}", response.StatusCode, errText);
+                    return null;
+                }
+
+                var resText = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(resText);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("choices", out var choices) &&
+                    choices.GetArrayLength() > 0 &&
+                    choices[0].TryGetProperty("message", out var messageObj) &&
+                    messageObj.TryGetProperty("content", out var contentProp))
+                {
+                    return contentProp.GetString();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error calling OpenAI API");
+            }
+            return null;
         }
     }
 }
