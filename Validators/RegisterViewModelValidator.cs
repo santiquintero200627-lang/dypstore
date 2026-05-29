@@ -9,7 +9,7 @@ namespace DYPStore.Validators
     public class RegisterViewModelValidator : AbstractValidator<RegisterViewModel>
     {
         private const string NamePattern = "^[\\p{L} .'-]{2,100}$";
-        private const string PasswordPattern = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*\\W).{8,}$";
+        private const string PasswordPattern = @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z0-9\s<>&""'/])[^<>&""'/]{8,}$";
 
         private const string EmailPattern = @"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
 
@@ -26,7 +26,7 @@ namespace DYPStore.Validators
 
             RuleFor(x => x.Password)
                 .NotEmpty().WithMessage("La contraseña es requerida")
-                .Matches(PasswordPattern).WithMessage("La contraseña debe tener al menos 8 caracteres, incluir mayúsculas, minúsculas, números y símbolos.");
+                .Matches(PasswordPattern).WithMessage("La contraseña debe tener al menos 8 caracteres, mayúsculas, minúsculas, números y símbolos permitidos (No uses < > & \" ' /).");
 
             RuleFor(x => x.ConfirmPassword)
                 .Equal(x => x.Password).WithMessage("Las contraseñas no coinciden");
