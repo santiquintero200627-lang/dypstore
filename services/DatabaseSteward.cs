@@ -1,86 +1,47 @@
-using Npgsql;
-using System.Net.Sockets;
+using Microsoft.Extensions.Configuration;
+using System;
 
 namespace DYPStore.Services
 {
     public class DatabaseSteward
     {
         private readonly IConfiguration _configuration;
-        private readonly ILogger<DatabaseSteward> _logger;
-        private string? _activeConnectionString;
-        private bool _isUsingSecondaryDb;
+        public bool IsUsingSecondaryDb { get; private set; } = false;
 
-        public bool IsUsingSecondaryDb => _isUsingSecondaryDb;
-
-        public DatabaseSteward(IConfiguration configuration, ILogger<DatabaseSteward> logger)
+        public DatabaseSteward(IConfiguration configuration)
         {
             _configuration = configuration;
-            _logger = logger;
         }
 
         public string GetConnectionString()
         {
-            if (_activeConnectionString != null)
-                return _activeConnectionString;
-
-            var primary = _configuration.GetConnectionString("PrimarySupabase");
-            var secondary = _configuration.GetConnectionString("SecondaryNeon");
-
-            if (string.IsNullOrWhiteSpace(primary))
-            {
-                if (string.IsNullOrWhiteSpace(secondary))
-                    throw new InvalidOperationException("Las cadenas de conexión no están configuradas.");
-
-                ValidateConnectionString(secondary, "SecondaryNeon");
-                _isUsingSecondaryDb = true;
-                _activeConnectionString = secondary!;
-                return _activeConnectionString;
-            }
-
             try
             {
-                using var primaryConnection = new NpgsqlConnection(primary);
-                primaryConnection.Open();
-                _isUsingSecondaryDb = false;
-                _logger.LogInformation("Conectado exitosamente a PrimarySupabase.");
-                _activeConnectionString = primary;
-                return _activeConnectionString;
-            }
-            catch (Exception exPrimary)
-            {
-                _logger.LogWarning(exPrimary, "Fallo al conectar a PrimarySupabase.");
-                if (string.IsNullOrWhiteSpace(secondary))
-                    throw new InvalidOperationException("No se pudo conectar a PrimarySupabase y no hay SecondaryNeon configurada.", exPrimary);
+                // 1. Intentar leer variables de entorno
+                string envConn = Environment.GetEnvironmentVariable("PRIMARY_DB_CONNECTION") 
+                              ?? Environment.GetEnvironmentVariable("POSTGRES_CONNECTION");
 
-                ValidateConnectionString(secondary, "SecondaryNeon");
-
-                try
+                if (!string.IsNullOrEmpty(envConn))
                 {
-                    using var secondaryConnection = new NpgsqlConnection(secondary);
-                    secondaryConnection.Open();
-                    _isUsingSecondaryDb = true;
-                    _logger.LogInformation("Conectado exitosamente a SecondaryNeon.");
-                    _activeConnectionString = secondary;
-                    return _activeConnectionString;
-                }
-                catch (Exception exSecondary)
-                {
-                    _logger.LogWarning(exSecondary, "Fallo al conectar a SecondaryNeon.");
-                    throw new InvalidOperationException("No se pudo conectar a ninguna base de datos válida.", exSecondary);
+                    return envConn;
                 }
             }
-        }
+            catch
+            {
+                // Ignorar excepciones al leer variables de entorno
+            }
 
-        private static void ValidateConnectionString(string connectionString, string name)
-        {
-            try
+            // 2. Intentar leer appsettings
+            string primaryConfig = _configuration.GetConnectionString("PrimarySupabase") 
+                                ?? _configuration.GetConnectionString("DefaultConnection");
+
+            if (!string.IsNullOrEmpty(primaryConfig))
             {
-                _ = new NpgsqlConnectionStringBuilder(connectionString);
+                return primaryConfig;
             }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"La cadena de conexión {name} no tiene un formato válido.", ex);
-            }
+
+            // 3. Fallback directo a Aiven PostgreSQL
+            return "Host=pg-cc4b12f-dypstore2026-77e3.a.aivencloud.com;Port=28541;Database=defaultdb;Username=avnadmin;Password=AVNS_fCtSlob8Z5sI0el0S6t;SSL Mode=Require;Trust Server Certificate=true;";
         }
     }
 }
