@@ -19,16 +19,32 @@ ServicePointManager.DnsRefreshTimeout = 0;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Base de Datos (Failover con DatabaseSteward)
+// Helper local para obtener la conexión con fallback seguro
+string GetSafeConnectionString(IServiceProvider sp, IConfiguration config)
+{
+    try
+    {
+        var steward = sp.GetRequiredService<DatabaseSteward>();
+        return steward.GetConnectionString();
+    }
+    catch
+    {
+        return config.GetConnectionString("PrimarySupabase") 
+            ?? config.GetConnectionString("DefaultConnection") 
+            ?? string.Empty;
+    }
+}
+
+// 1. Base de Datos (Failover con DatabaseSteward y fallback a appsettings)
 builder.Services.AddSingleton<DatabaseSteward>();
 builder.Services.AddDbContext<ApplicationDbContext>((sp, options) => {
-    var steward = sp.GetRequiredService<DatabaseSteward>();
-    options.UseNpgsql(steward.GetConnectionString());
+    string connString = GetSafeConnectionString(sp, builder.Configuration);
+    options.UseNpgsql(connString);
 });
 
 builder.Services.AddDbContext<DataProtectionKeyContext>((sp, options) => {
-    var steward = sp.GetRequiredService<DatabaseSteward>();
-    options.UseNpgsql(steward.GetConnectionString());
+    string connString = GetSafeConnectionString(sp, builder.Configuration);
+    options.UseNpgsql(connString);
 });
 
 builder.Services.AddDataProtection()
@@ -86,8 +102,15 @@ var app = builder.Build();
 // Middleware para inyectar el estado de Failover para el Frontend
 app.Use(async (context, next) =>
 {
-    var steward = context.RequestServices.GetRequiredService<DatabaseSteward>();
-    context.Items["IsSecondaryDb"] = steward.IsUsingSecondaryDb;
+    try
+    {
+        var steward = context.RequestServices.GetRequiredService<DatabaseSteward>();
+        context.Items["IsSecondaryDb"] = steward.IsUsingSecondaryDb;
+    }
+    catch
+    {
+        context.Items["IsSecondaryDb"] = false;
+    }
     await next();
 });
 
